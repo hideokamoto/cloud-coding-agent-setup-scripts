@@ -48,6 +48,6 @@ scripts/
 
 ## リポジトリ名について
 
-GitHub 上のリポジトリ名（`claude-code-web-setups`）は歴史的経緯で Claude Code on the web
-専用を示唆する名前になっているが、プロジェクト名は「Cloud Coding Agent Setup Scripts」。
-リポジトリ名の変更（リダイレクト対応含む）は別途対応する。
+GitHub 上のリポジトリ名は `cloud-coding-agent-setup-scripts`（旧名
+`claude-code-web-setups` からリネーム済み）。プロジェクト名「Cloud Coding Agent Setup
+Scripts」と一致している。
