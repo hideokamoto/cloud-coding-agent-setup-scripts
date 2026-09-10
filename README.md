@@ -1,12 +1,14 @@
-# claude-code-web-setups
+# Cloud Coding Agent Setup Scripts
 
-Claude Code on the web の環境設定にある「セットアップスクリプト」に差し込む、
-サービスごとのセットアップスクリプト集。
+Claude Code on the web / Cursor Cloud Agent / Devin など、クラウド上で動くコーディング
+エージェントの環境設定（セットアップスクリプト）に差し込む、サービスごとのセットアップ
+スクリプト集。
 
 ## 使い方
 
 1. `scripts/` から使いたいサービスのスクリプトを選ぶ（例: `scripts/chunk.sh`）。
-2. その内容を Claude Code on the web の環境設定 →「セットアップスクリプト」欄に貼り付ける。
+2. その内容を利用中のエージェント環境のセットアップスクリプト欄（Claude Code on the web
+   の「セットアップスクリプト」など）に貼り付ける。
 
 ## 収録スクリプト
 
