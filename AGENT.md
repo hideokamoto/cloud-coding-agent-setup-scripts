@@ -45,9 +45,3 @@ scripts/
 
 `CLAUDE.md` はこのファイル（`AGENT.md`）への symlink。内容の実体は本ファイルに集約し、
 二重管理を避ける。
-
-## リポジトリ名について
-
-GitHub 上のリポジトリ名（`claude-code-web-setups`）は歴史的経緯で Claude Code on the web
-専用を示唆する名前になっているが、プロジェクト名は「Cloud Coding Agent Setup Scripts」。
-リポジトリ名の変更（リダイレクト対応含む）は別途対応する。
