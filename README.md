@@ -14,7 +14,9 @@ Claude Code on the web / Cursor Cloud Agent / Devin など、クラウド上で�
 curl -fsSL https://raw.githubusercontent.com/hideokamoto/claude-code-web-setups/<tag>/scripts/chunk.sh | bash
 ```
 
-`<tag>` は必ず `v0.1.0` のような特定のタグに固定してください。`main` など可変参照を使うと、
+`<tag>` は必ず `vX.Y.Z` 形式の特定のタグに固定してください（まだタグは発行されていません。最新タグは
+[Releases](https://github.com/hideokamoto/claude-code-web-setups/releases) を参照してください）。
+`main` など可変参照を使うと、
 このコマンドはセッション開始のたびに実行される性質上、後から中身が書き換わっても気づかず
 実行してしまいます。タグ固定なら同じ内容が常に取得されるため、この心配はありません。
 
