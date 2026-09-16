@@ -6,6 +6,9 @@ set -euo pipefail
 #
 # 対応harness: claude / kiro / cursor
 #   環境変数 AIDLC_HARNESS で選択(未指定時は claude)。
+#   このスクリプトはインストールとバージョンpinのみ行い、`aidlc config
+#   --harness` (各harness用設定ファイルの生成・上書き)は自動実行しない
+#   (理由は後述コメント参照)。実行コマンドはスクリプト末尾に案内される。
 #
 # バージョンは呼び出し元プロジェクトルートの .aidlc-version でpinする
 # (例: echo "2.9.0" > .aidlc-version)。
@@ -29,12 +32,12 @@ case "$HARNESS" in
     ;;
 esac
 
-if [ ! -f .aidlc-version ]; then
-  echo ".aidlc-version が見つかりません。プロジェクトルートにpinするバージョン(例: 2.9.0)を書いたファイルを用意してください。" >&2
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ ! -f "$PROJECT_DIR/.aidlc-version" ]; then
+  echo ".aidlc-version が見つかりません($PROJECT_DIR)。プロジェクトルートにpinするバージョン(例: 2.9.0)を書いたファイルを用意してください。" >&2
   exit 1
 fi
-AIDLC_PIN="$(tr -d '[:space:]' < .aidlc-version)"
-PROJECT_DIR="$(pwd)"
+AIDLC_PIN="$(tr -d '[:space:]' < "$PROJECT_DIR/.aidlc-version")"
 
 if [ "$(id -u)" -eq 0 ]; then
   RUN_AS="${AIDLC_INSTALL_USER:-}"
@@ -50,13 +53,18 @@ if [ "$(id -u)" -eq 0 ]; then
   export AIDLC_INSTALL_ROOT="${AIDLC_INSTALL_ROOT:-/opt/aidlc}"
   export AIDLC_BIN_DIR="${AIDLC_BIN_DIR:-/opt/aidlc/bin}"
   mkdir -p "$AIDLC_INSTALL_ROOT" "$AIDLC_BIN_DIR"
-  chown "$RUN_AS" "$AIDLC_INSTALL_ROOT" "$AIDLC_BIN_DIR"
+  chown -R "$RUN_AS" "$AIDLC_INSTALL_ROOT" "$AIDLC_BIN_DIR"
 else
   export AIDLC_INSTALL_ROOT="${AIDLC_INSTALL_ROOT:-$HOME/.local/share/aidlc}"
   export AIDLC_BIN_DIR="${AIDLC_BIN_DIR:-$HOME/.local/bin}"
 fi
 
 export PATH="$AIDLC_BIN_DIR:$PATH"
+# 注意: .bashrc の `[ -z "$PS1" ] && return`(非対話シェルでは即return)により、
+# このフック登録はフックなど非対話プロセスからの `aidlc` 呼び出しには効かない
+# (実機で確認済み)。以降のセッションでもPATHを通す必要がある場合は、
+# エージェント環境側の環境変数設定に PATH=$AIDLC_BIN_DIR:$PATH と
+# AIDLC_INSTALL_ROOT / AIDLC_BIN_DIR を恒久的に設定すること。
 grep -qF "$AIDLC_BIN_DIR" "$HOME/.bashrc" 2>/dev/null || \
   echo "export PATH=\"$AIDLC_BIN_DIR:\$PATH\"" >> "$HOME/.bashrc"
 
@@ -68,6 +76,9 @@ if ! "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | grep -qF "$AIDLC_PIN"; then
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL "https://github.com/${REPO}/releases/download/v${AIDLC_PIN}/install.sh" \
     -o "$tmp/install.sh"
+  # root の mktemp -d は 0700/root 所有のため、委譲先の非rootユーザーが
+  # ディレクトリを辿れない(実機で Permission denied を確認済み)。
+  chmod 0755 "$tmp"
   if [ "$(id -u)" -eq 0 ]; then
     su "$RUN_AS" -s /bin/sh -c \
       "AIDLC_INSTALL_ROOT=\"$AIDLC_INSTALL_ROOT\" AIDLC_BIN_DIR=\"$AIDLC_BIN_DIR\" sh \"$tmp/install.sh\" --version \"$AIDLC_PIN\" --yes"
@@ -81,9 +92,17 @@ fi
 
 # 3. プロジェクト設定
 #    --pin と --harness は別操作(GitHub Issue #1047 で実在を確認済み)。
-#    --pin はマシンにこのバージョンの使用を登録するために必須。
-#    --harness は各harness用の設定を生成/更新するが、進行中のワークフローが
-#    あるプロジェクトでは失敗する可能性があるため、全体を止めずに警告に留める。
+#    --pin はマシンにこのバージョンの使用を登録するために必要。
+#
+#    --harness は各harness用の設定ファイル(.claude/ 等)を生成・上書きする
+#    ownership採用操作であり、既存の手動カスタマイズを巻き戻す可能性がある。
+#    また進行中のAI-DLCワークフローがあると失敗しうる。これらはリポジトリ
+#    ごとに事情が異なり自動実行すべきでないため、setup scriptからは外し、
+#    必要な人が意図したタイミングで手動実行する運用にする:
+#      aidlc config --harness "$AIDLC_HARNESS" --project-dir .
 "$AIDLC_BIN_DIR/aidlc" config --pin "$AIDLC_PIN" --project-dir "$PROJECT_DIR"
-"$AIDLC_BIN_DIR/aidlc" config --harness "$HARNESS" --project-dir "$PROJECT_DIR" || \
-  echo "warning: aidlc config --harness が失敗しました。進行中のワークフローがある場合は手動で再実行してください。" >&2
+
+# 4. 確認
+"$AIDLC_BIN_DIR/aidlc" doctor || true
+
+echo "note: harness設定は未実行です。必要なら手動で実行してください: aidlc config --harness ${HARNESS} --project-dir ${PROJECT_DIR}" >&2
