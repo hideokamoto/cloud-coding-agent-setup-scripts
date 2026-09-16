@@ -40,6 +40,10 @@ if [ ! -f "$PROJECT_DIR/.aidlc-version" ]; then
   exit 1
 fi
 AIDLC_PIN="$(tr -d '[:space:]' < "$PROJECT_DIR/.aidlc-version")"
+if [ -z "$AIDLC_PIN" ]; then
+  echo ".aidlc-version が空です($PROJECT_DIR)。pinするバージョン(例: 2.9.0)を書いてください。" >&2
+  exit 1
+fi
 
 RUN_AS=""
 if [ "$(id -u)" -eq 0 ]; then
