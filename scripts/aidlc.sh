@@ -17,9 +17,11 @@ set -euo pipefail
 #   ( releases/*/install.sh に `[ "$(id -u)" -ne 0 ] || fail 4 ... "refusing a
 #     root install; run as the target user"` があることを実機で確認済み )。
 # 多くのクラウドコーディングエージェントのセットアップスクリプトは root で
-# 走るため、その場合はインストールだけ非rootユーザーに委譲し、共有パス
-# (AIDLC_BIN_DIR / AIDLC_INSTALL_ROOT。install.sh 側が読むことを確認済み)
-# を通じて root セッションからも同じ aidlc を参照する。
+# 走るため、その場合はインストール・pin登録・doctorをすべて非rootユーザーに
+# 委譲し、共有パス(AIDLC_BIN_DIR / AIDLC_INSTALL_ROOT。install.sh 側が読む
+# ことを確認済み)を通じて root セッションからも同じ aidlc を参照する
+# (`aidlc config`/`doctor` がユーザー所有のファイルに書き込む可能性がある
+#  ため、install だけでなくすべての aidlc 呼び出しを委譲する)。
 
 REPO="awslabs/aidlc-workflows"
 HARNESS="${AIDLC_HARNESS:-claude}"
@@ -39,6 +41,7 @@ if [ ! -f "$PROJECT_DIR/.aidlc-version" ]; then
 fi
 AIDLC_PIN="$(tr -d '[:space:]' < "$PROJECT_DIR/.aidlc-version")"
 
+RUN_AS=""
 if [ "$(id -u)" -eq 0 ]; then
   RUN_AS="${AIDLC_INSTALL_USER:-}"
   if [ -z "$RUN_AS" ]; then
@@ -59,19 +62,46 @@ else
   export AIDLC_BIN_DIR="${AIDLC_BIN_DIR:-$HOME/.local/bin}"
 fi
 
+# root実行時は $RUN_AS として、非root実行時はそのままコマンドを実行する。
+# `su ... -c 'exec "$0" "$@"' -- /usr/bin/env ...` は argv をそのまま保った
+# まま渡せるため、パスやバージョン文字列を su の -c 文字列内で再クオート
+# する必要がなく、引用符ネストによる事故を避けられる(実機で動作確認済み)。
+run_as() {
+  if [ -n "$RUN_AS" ]; then
+    su "$RUN_AS" -s /bin/sh -c 'exec "$0" "$@"' -- /usr/bin/env \
+      AIDLC_INSTALL_ROOT="$AIDLC_INSTALL_ROOT" \
+      AIDLC_BIN_DIR="$AIDLC_BIN_DIR" \
+      PATH="$AIDLC_BIN_DIR:$PATH" \
+      "$@"
+  else
+    "$@"
+  fi
+}
+
 export PATH="$AIDLC_BIN_DIR:$PATH"
 # 注意: .bashrc の `[ -z "$PS1" ] && return`(非対話シェルでは即return)により、
-# このフック登録はフックなど非対話プロセスからの `aidlc` 呼び出しには効かない
+# この登録はフックなど非対話プロセスからの `aidlc` 呼び出しには効かない
 # (実機で確認済み)。以降のセッションでもPATHを通す必要がある場合は、
 # エージェント環境側の環境変数設定に PATH=$AIDLC_BIN_DIR:$PATH と
 # AIDLC_INSTALL_ROOT / AIDLC_BIN_DIR を恒久的に設定すること。
 grep -qF "$AIDLC_BIN_DIR" "$HOME/.bashrc" 2>/dev/null || \
   echo "export PATH=\"$AIDLC_BIN_DIR:\$PATH\"" >> "$HOME/.bashrc"
+# root実行時、上の行は root の $HOME/.bashrc にしか効かず、実際にバイナリを
+# 使う委譲先ユーザーには反映されない(root の $HOME はそのユーザーの
+# ホームではないため)。委譲先ユーザー自身に、そのユーザーの $HOME/.bashrc
+# へ追記させる。
+if [ -n "$RUN_AS" ]; then
+  run_as sh -c 'grep -qF "$AIDLC_BIN_DIR" "$HOME/.bashrc" 2>/dev/null || printf "export PATH=\"%s:\$PATH\"\n" "$AIDLC_BIN_DIR" >> "$HOME/.bashrc"'
+fi
 
 # 1. インストール(導入済みでpinバージョンを含んでいればスキップ)
-#    `aidlc --version` の厳密な出力フォーマットは未検証のため、
-#    完全一致ではなく部分一致で判定する(フォーマット差異に強くする)。
-if ! "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | grep -qF "$AIDLC_PIN"; then
+#    `aidlc --version` の厳密な出力フォーマットは未検証のため完全一致は
+#    避けるが、単なる部分一致(grep -qF)だと "2.9.0" が "12.9.0" のような
+#    無関係な文字列にもマッチしてしまう。前後が数字/ピリオドでないことを
+#    要求して、部分一致の誤検知を防ぐ。
+AIDLC_PIN_RE="$(printf '%s' "$AIDLC_PIN" | sed 's/[.[\*^$]/\\&/g')"
+if ! run_as "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | \
+     grep -qE "(^|[^0-9.])${AIDLC_PIN_RE}([^0-9.]|\$)"; then
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL "https://github.com/${REPO}/releases/download/v${AIDLC_PIN}/install.sh" \
@@ -79,16 +109,11 @@ if ! "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | grep -qF "$AIDLC_PIN"; then
   # root の mktemp -d は 0700/root 所有のため、委譲先の非rootユーザーが
   # ディレクトリを辿れない(実機で Permission denied を確認済み)。
   chmod 0755 "$tmp"
-  if [ "$(id -u)" -eq 0 ]; then
-    su "$RUN_AS" -s /bin/sh -c \
-      "AIDLC_INSTALL_ROOT=\"$AIDLC_INSTALL_ROOT\" AIDLC_BIN_DIR=\"$AIDLC_BIN_DIR\" sh \"$tmp/install.sh\" --version \"$AIDLC_PIN\" --yes"
-  else
-    sh "$tmp/install.sh" --version "$AIDLC_PIN" --yes
-  fi
+  run_as sh "$tmp/install.sh" --version "$AIDLC_PIN" --yes
 fi
 
 # 2. 確認
-"$AIDLC_BIN_DIR/aidlc" --version
+run_as "$AIDLC_BIN_DIR/aidlc" --version
 
 # 3. プロジェクト設定
 #    --pin と --harness は別操作(GitHub Issue #1047 で実在を確認済み)。
@@ -100,9 +125,9 @@ fi
 #    ごとに事情が異なり自動実行すべきでないため、setup scriptからは外し、
 #    必要な人が意図したタイミングで手動実行する運用にする:
 #      aidlc config --harness "$AIDLC_HARNESS" --project-dir .
-"$AIDLC_BIN_DIR/aidlc" config --pin "$AIDLC_PIN" --project-dir "$PROJECT_DIR"
+run_as "$AIDLC_BIN_DIR/aidlc" config --pin "$AIDLC_PIN" --project-dir "$PROJECT_DIR"
 
 # 4. 確認
-"$AIDLC_BIN_DIR/aidlc" doctor || true
+run_as "$AIDLC_BIN_DIR/aidlc" doctor || true
 
 echo "note: harness設定は未実行です。必要なら手動で実行してください: aidlc config --harness ${HARNESS} --project-dir ${PROJECT_DIR}" >&2
