@@ -21,9 +21,10 @@ APIを呼ばない汎用シェルスクリプトなので、どのエージェ�
 ```
 scripts/
   chunk.sh   # CircleCI MCP (chunk-cli) のインストール・初期設定
+  aidlc.sh   # AI-DLC (aidlc-workflows) のインストール・プロジェクト設定
 ```
 
-- 現時点では CircleCI 用の `chunk.sh` のみ。
+- 現時点では `chunk.sh` と `aidlc.sh` のみ。
 - 今後サービスを追加する場合は、サービスごとに1スクリプトを基本とする
   （サービスの手順が複数ファイルに分かれる場合は `scripts/<service>/` の
   サブディレクトリを切る）。
