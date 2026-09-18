@@ -4,6 +4,14 @@ set -euo pipefail
 # AI-DLC (awslabs/aidlc-workflows) のインストール・プロジェクト設定
 # https://github.com/awslabs/aidlc-workflows
 #
+# 使い方:
+#   1. 対象プロジェクトのルートに .aidlc-version を用意する(pinするバージョン)
+#        echo "2.9.0" > .aidlc-version
+#   2. クラウドエージェント環境のセットアップスクリプト欄にこのファイルの
+#      内容を貼り付けるか、curl | bash で取得して実行する
+#        curl -fsSL https://raw.githubusercontent.com/hideokamoto/cloud-coding-agent-setup-scripts/main/scripts/aidlc.sh | bash
+#      (harnessを切り替える場合は実行前に AIDLC_HARNESS=kiro のように指定する)
+#
 # 対応harness: claude / kiro / cursor
 #   環境変数 AIDLC_HARNESS で選択(未指定時は claude)。
 #   このスクリプトはインストールとバージョンpinのみ行い、`aidlc config
