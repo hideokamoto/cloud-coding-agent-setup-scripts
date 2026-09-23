@@ -25,11 +25,11 @@ set -euo pipefail
 #   ( releases/*/install.sh に `[ "$(id -u)" -ne 0 ] || fail 4 ... "refusing a
 #     root install; run as the target user"` があることを実機で確認済み )。
 # 多くのクラウドコーディングエージェントのセットアップスクリプトは root で
-# 走るため、その場合はインストール・pin登録・doctorをすべて非rootユーザーに
-# 委譲し、共有パス(AIDLC_BIN_DIR / AIDLC_INSTALL_ROOT。install.sh 側が読む
-# ことを確認済み)を通じて root セッションからも同じ aidlc を参照する
-# (`aidlc config`/`doctor` がユーザー所有のファイルに書き込む可能性がある
-#  ため、install だけでなくすべての aidlc 呼び出しを委譲する)。
+# 走るため、その場合はインストールだけを非rootユーザーに委譲し、共有パス
+# (AIDLC_BIN_DIR / AIDLC_INSTALL_ROOT。install.sh 側が読むことを確認済み)と
+# /usr/local/bin/aidlc のラッパーを通じて root セッションからも同じ aidlc を
+# 参照する。pin登録・doctor は root 所有のプロジェクトに書き込むため root の
+# まま実行する(詳細は該当箇所のコメント参照)。
 
 REPO="awslabs/aidlc-workflows"
 HARNESS="${AIDLC_HARNESS:-claude}"
@@ -69,6 +69,20 @@ if [ "$(id -u)" -eq 0 ]; then
   export AIDLC_BIN_DIR="${AIDLC_BIN_DIR:-/opt/aidlc/bin}"
   mkdir -p "$AIDLC_INSTALL_ROOT" "$AIDLC_BIN_DIR"
   chown -R "$RUN_AS" "$AIDLC_INSTALL_ROOT" "$AIDLC_BIN_DIR"
+
+  # プロキシ経由の環境では CURL_CA_BUNDLE / SSL_CERT_FILE が root 専用の
+  # パス(例: /root/.ccr/ca-bundle.crt。/root は 0700)を指していることがあり、
+  # 委譲先ユーザーの curl が exit 77 で落ちる(Claude Code on the web で
+  # 実機確認済み)。委譲先が読めない場合は読める場所へコピーして渡す。
+  CA_SRC="${AIDLC_CA_BUNDLE:-${CURL_CA_BUNDLE:-${SSL_CERT_FILE:-}}}"
+  if [ -n "$CA_SRC" ] && [ -f "$CA_SRC" ] && \
+     ! su "$RUN_AS" -s /bin/sh -c 'test -r "$0"' "$CA_SRC"; then
+    install -m 0644 "$CA_SRC" "$AIDLC_INSTALL_ROOT/ca-bundle.crt"
+    CA_SRC="$AIDLC_INSTALL_ROOT/ca-bundle.crt"
+  fi
+  if [ -n "$CA_SRC" ]; then
+    export AIDLC_CA_BUNDLE="$CA_SRC" CURL_CA_BUNDLE="$CA_SRC" SSL_CERT_FILE="$CA_SRC"
+  fi
 else
   export AIDLC_INSTALL_ROOT="${AIDLC_INSTALL_ROOT:-$HOME/.local/share/aidlc}"
   export AIDLC_BIN_DIR="${AIDLC_BIN_DIR:-$HOME/.local/bin}"
@@ -84,6 +98,9 @@ run_as() {
       AIDLC_INSTALL_ROOT="$AIDLC_INSTALL_ROOT" \
       AIDLC_BIN_DIR="$AIDLC_BIN_DIR" \
       PATH="$AIDLC_BIN_DIR:$PATH" \
+      ${AIDLC_CA_BUNDLE:+AIDLC_CA_BUNDLE="$AIDLC_CA_BUNDLE"} \
+      ${AIDLC_CA_BUNDLE:+CURL_CA_BUNDLE="$AIDLC_CA_BUNDLE"} \
+      ${AIDLC_CA_BUNDLE:+SSL_CERT_FILE="$AIDLC_CA_BUNDLE"} \
       "$@"
   else
     "$@"
@@ -127,6 +144,21 @@ fi
 # 2. 確認
 run_as "$AIDLC_BIN_DIR/aidlc" --version
 
+# root実行時、フック(root で動く `aidlc engine hook ...`)は .bashrc を読まず
+# `aidlc` を解決できない。また aidlc はpin情報を AIDLC_INSTALL_ROOT 配下から
+# 読むため、PATHが通っていても環境変数なしの root からは「pin未登録」で
+# 失敗する(いずれも実機確認済み)。chunk.sh と同様に既に PATH にある
+# /usr/local/bin へ、AIDLC_INSTALL_ROOT を固定するラッパーを置く。
+if [ -n "$RUN_AS" ]; then
+  cat > /usr/local/bin/aidlc <<EOF
+#!/bin/sh
+export AIDLC_INSTALL_ROOT="\${AIDLC_INSTALL_ROOT:-$AIDLC_INSTALL_ROOT}"
+exec "$AIDLC_BIN_DIR/aidlc" "\$@"
+EOF
+  chmod 0755 /usr/local/bin/aidlc
+  aidlc --version
+fi
+
 # 3. プロジェクト設定
 #    --pin と --harness は別操作(GitHub Issue #1047 で実在を確認済み)。
 #    --pin はマシンにこのバージョンの使用を登録するために必要。
@@ -137,9 +169,20 @@ run_as "$AIDLC_BIN_DIR/aidlc" --version
 #    ごとに事情が異なり自動実行すべきでないため、setup scriptからは外し、
 #    必要な人が意図したタイミングで手動実行する運用にする:
 #      aidlc config --harness "$AIDLC_HARNESS" --project-dir .
-run_as "$AIDLC_BIN_DIR/aidlc" config --pin "$AIDLC_PIN" --project-dir "$PROJECT_DIR"
+#
+#    config / doctor はプロジェクトディレクトリにロックファイル等を書く。
+#    root実行時のリポジトリは root 所有で委譲先ユーザーは書けない(EACCES を
+#    実機確認済み)ため、これらは委譲せず root のまま実行する(root 拒否は
+#    install.sh だけで、aidlc 本体は root で動くことを確認済み)。root が
+#    インストール先に作ったファイル(pins.json 等)は委譲先へ所有権を戻し、
+#    以後の委譲インストール・更新が書き込めるようにする。
+"$AIDLC_BIN_DIR/aidlc" config --pin "$AIDLC_PIN" --project-dir "$PROJECT_DIR"
 
 # 4. 確認
-run_as "$AIDLC_BIN_DIR/aidlc" doctor || true
+"$AIDLC_BIN_DIR/aidlc" doctor --project-dir "$PROJECT_DIR" || true
+
+if [ -n "$RUN_AS" ]; then
+  chown -R "$RUN_AS" "$AIDLC_INSTALL_ROOT"
+fi
 
 echo "note: harness設定は未実行です。必要なら手動で実行してください: aidlc config --harness ${HARNESS} --project-dir ${PROJECT_DIR}" >&2
