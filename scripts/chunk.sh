@@ -21,9 +21,16 @@ chunk skill install
 
 # 5. chunk sidecar sync が使う openssh-client / rsync を用意
 #    (未導入の場合のみ apt を叩く。導入済みなら毎回のupdateを避ける)
+#    apt-get update は無関係なサードパーティ源(PPA等)がプロキシで拒否される
+#    だけでも失敗しうる。まず既存のパッケージリストで install を試し、
+#    失敗したときだけ update する。update の失敗は致命扱いにせず、最終的な
+#    成否は install の結果で判定する。
 if ! command -v rsync >/dev/null 2>&1 || ! command -v ssh-keygen >/dev/null 2>&1; then
-  apt-get update -qq
-  apt-get install -y --no-install-recommends openssh-client rsync
+  echo "==> installing openssh-client / rsync"
+  if ! apt-get install -y --no-install-recommends openssh-client rsync; then
+    apt-get update -qq || echo "warn: apt-get update failed; retrying install with available lists" >&2
+    apt-get install -y --no-install-recommends openssh-client rsync
+  fi
 fi
 
 # 6. sidecar用SSH鍵を事前生成(未生成時のみ)
@@ -34,5 +41,5 @@ if [ ! -f ~/.ssh/chunk_ai ]; then
 fi
 
 # 7. 確認
-rsync --version | head -n1
+rsync --version | sed -n 1p
 ssh-keygen -y -f ~/.ssh/chunk_ai >/dev/null && echo "chunk_ai key: ok"
