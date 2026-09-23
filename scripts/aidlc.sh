@@ -149,10 +149,19 @@ run_as "$AIDLC_BIN_DIR/aidlc" --version
 # 読むため、PATHが通っていても環境変数なしの root からは「pin未登録」で
 # 失敗する(いずれも実機確認済み)。chunk.sh と同様に既に PATH にある
 # /usr/local/bin へ、AIDLC_INSTALL_ROOT を固定するラッパーを置く。
+# AIDLC_BIN_DIR も固定する。無いと doctor が root の既定値(~/.local/bin)で
+# ランチャーを探し「Command pointer is missing」で fail する(実機確認済み)。
+#
+# 注意: doctor の "Runtime hook PATH: aidlc is interactive-only at
+# /usr/local/bin/aidlc" warn は残る。doctor は非対話PATHを `getconf PATH`
+# (Ubuntu では /bin:/usr/bin)から推定するためで、実際のフックはセッションの
+# PATH(/usr/local/bin を含む)を継承して動く。/usr/bin はパッケージ管理下の
+# ため、warn を消す目的でそこには置かない。
 if [ -n "$RUN_AS" ]; then
   cat > /usr/local/bin/aidlc <<EOF
 #!/bin/sh
 export AIDLC_INSTALL_ROOT="\${AIDLC_INSTALL_ROOT:-$AIDLC_INSTALL_ROOT}"
+export AIDLC_BIN_DIR="\${AIDLC_BIN_DIR:-$AIDLC_BIN_DIR}"
 exec "$AIDLC_BIN_DIR/aidlc" "\$@"
 EOF
   chmod 0755 /usr/local/bin/aidlc
