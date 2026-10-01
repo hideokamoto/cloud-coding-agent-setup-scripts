@@ -22,6 +22,9 @@ APIを呼ばない汎用シェルスクリプトなので、どのエージェ�
 scripts/
   chunk.sh   # CircleCI MCP (chunk-cli) のインストール・初期設定
   aidlc.sh   # AI-DLC (aidlc-workflows) のインストール・プロジェクト設定
+tests/
+  selftest.sh  # scripts/ 配下を使い捨てプロジェクトで実行し成否を報告する検査
+  README.md    # 検査の目的と、Claude Code の Routine での定期実行手順
 ```
 
 - 現時点では `chunk.sh` と `aidlc.sh` のみ。
@@ -37,6 +40,8 @@ scripts/
 - ファイル先頭は `#!/bin/bash` + `set -euo pipefail`。
 - 冪等性を意識する。既にインストール済み・設定済みなら重い処理
   （`apt-get update` など）はスキップする（`chunk.sh` の rsync/ssh-keygen 部分を参照）。
+- 追加したスクリプトは `tests/selftest.sh` の検査対象に自動で入る（`scripts/*.sh`
+  を全件実行する）。追加後に `bash tests/selftest.sh` が PASS することを確認する。
 - インストール後は簡単な動作確認コマンド（`--version` など）を実行し、
   成功したことがログでわかるようにする。
 - 認証情報やトークンをスクリプトに埋め込まない。必要な環境変数は
