@@ -10,7 +10,13 @@ set -euo pipefail
 #   2. クラウドエージェント環境のセットアップスクリプト欄にこのファイルの
 #      内容を貼り付けるか、curl | bash で取得して実行する
 #        curl -fsSL https://raw.githubusercontent.com/hideokamoto/cloud-coding-agent-setup-scripts/main/scripts/aidlc.sh | bash
-#      (harnessを切り替える場合は実行前に AIDLC_HARNESS=kiro のように指定する)
+#      (環境変数は bash 側に渡す。`AIDLC_HARNESS=kiro curl ... | bash` だと
+#       変数は curl にしか渡らない。正しくは:
+#         curl -fsSL ... | AIDLC_HARNESS=kiro bash
+#       AIDLC_REQUIRE_PROVENANCE=1 も同じ書き方。)
+#      注意: Claude Code on the web では、環境設定画面の環境変数は setup script
+#      の実行時には渡されない(実測)。このスクリプトの挙動を変える変数は、
+#      上記のようにスクリプト欄の中へ直接書くこと。
 #
 # 対応harness: claude / kiro / cursor
 #   環境変数 AIDLC_HARNESS で選択(未指定時は claude)。
@@ -101,6 +107,7 @@ run_as() {
       ${AIDLC_CA_BUNDLE:+AIDLC_CA_BUNDLE="$AIDLC_CA_BUNDLE"} \
       ${AIDLC_CA_BUNDLE:+CURL_CA_BUNDLE="$AIDLC_CA_BUNDLE"} \
       ${AIDLC_CA_BUNDLE:+SSL_CERT_FILE="$AIDLC_CA_BUNDLE"} \
+      ${AIDLC_GH_BIN:+AIDLC_GH_BIN="$AIDLC_GH_BIN"} \
       "$@"
   else
     "$@"
@@ -131,6 +138,31 @@ fi
 AIDLC_PIN_RE="$(printf '%s' "$AIDLC_PIN" | sed 's/[.[\*^$]/\\&/g')"
 if ! run_as "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | \
      grep -qE "(^|[^0-9.])${AIDLC_PIN_RE}([^0-9.]|\$)"; then
+  # upstream install.sh は gh(attestation verify 対応版)があると Sigstore 署名検証を
+  # 実行し、失敗すると exit 4 で止まる。検証には Sigstore の TUF 配布元への通信が要るが、
+  # Claude Code on the web の既定の許可リストには含まれない。gh の有無はイメージ次第で
+  # 変わるため、放置すると同じスクリプトが環境によって通ったり止まったりする。
+  #   届かない → gh を見せずに upstream のチェックサム検証へ委ねる(警告を出す)
+  #   届く     → install.sh に任せる。不一致なら exit 4 で止まるのが正しい
+  # AIDLC_REQUIRE_PROVENANCE=1 なら、届かないときは降格せず止める。
+  # (インストール失敗後に gh 抜きでやり直す作りにしないのは、本当に改ざんされて
+  #  いた場合まで黙って通してしまうため。「検証できない」と「不一致」を区別する。)
+  sigstore_reachable() {
+    for url in https://tuf-repo-cdn.sigstore.dev/timestamp.json \
+               https://tuf-repo.github.com/timestamp.json; do
+      code="$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "$url" 2>/dev/null || true)"
+      [ "$code" = "200" ] || return 1
+    done
+  }
+  if [ -z "${AIDLC_GH_BIN:-}" ] && ! sigstore_reachable; then
+    if [ "${AIDLC_REQUIRE_PROVENANCE:-0}" = "1" ]; then
+      echo "Sigstore の TUF 配布元に届かないため provenance 検証ができません。環境の Network access に tuf-repo-cdn.sigstore.dev と tuf-repo.github.com を許可してください。" >&2
+      exit 1
+    fi
+    echo "warn: Sigstore の TUF 配布元に届かないため、provenance 検証を省略して SHA-256 チェックサム検証のみで続行します" >&2
+    export AIDLC_GH_BIN=/nonexistent/gh
+  fi
+
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL "https://github.com/${REPO}/releases/download/v${AIDLC_PIN}/install.sh" \
