@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/hideokamoto/cloud-coding-agent-setu
 
 | スクリプト | 何をするか | コマンド |
 | --- | --- | --- |
-| `scripts/chunk.sh` | chunk-cli の最新版インストール、および `chunk sidecar sync` に必要な openssh-client / rsync の導入とSSH鍵の事前生成 | `curl -fsSL https://raw.githubusercontent.com/hideokamoto/cloud-coding-agent-setup-scripts/<tag>/scripts/chunk.sh \| bash` |
+| `scripts/chunk.sh` | chunk-cli の最新版インストール、および `chunk sidecar sync` に必要な openssh-client / rsync の導入と、OpenSSH 形式の SSH 鍵の用意（chunk が作る PKCS#8 形式の鍵は変換） | `curl -fsSL https://raw.githubusercontent.com/hideokamoto/cloud-coding-agent-setup-scripts/<tag>/scripts/chunk.sh \| bash` |
 | `scripts/aidlc.sh` | AI-DLC (awslabs/aidlc-workflows) のインストールと `.aidlc-version` に基づくバージョンpin。root環境では非rootユーザーへの委譲も行う。事前にプロジェクトルートへ `.aidlc-version`（pinするバージョン、例 `2.9.0`）を用意しておくこと。harnessは `claude`/`kiro`/`cursor` から環境変数 `AIDLC_HARNESS` で選択（未指定時は `claude`） | `curl -fsSL https://raw.githubusercontent.com/hideokamoto/cloud-coding-agent-setup-scripts/<tag>/scripts/aidlc.sh \| bash` |
 
 最新タグは [Releases](https://github.com/hideokamoto/cloud-coding-agent-setup-scripts/releases) を参照してください。
