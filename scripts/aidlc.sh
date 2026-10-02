@@ -13,7 +13,7 @@ set -euo pipefail
 #      (環境変数は bash 側に渡す。`AIDLC_HARNESS=kiro curl ... | bash` だと
 #       変数は curl にしか渡らない。正しくは:
 #         curl -fsSL ... | AIDLC_HARNESS=kiro bash
-#       AIDLC_REQUIRE_PROVENANCE=1 も同じ書き方。)
+#       AIDLC_ALLOW_UNVERIFIED=1 も同じ書き方。)
 #      注意: Claude Code on the web では、環境設定画面の環境変数は setup script
 #      の実行時には渡されない(実測)。このスクリプトの挙動を変える変数は、
 #      上記のようにスクリプト欄の中へ直接書くこと。
@@ -142,9 +142,15 @@ if ! run_as "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | \
   # 実行し、失敗すると exit 4 で止まる。検証には Sigstore の TUF 配布元への通信が要るが、
   # Claude Code on the web の既定の許可リストには含まれない。gh の有無はイメージ次第で
   # 変わるため、放置すると同じスクリプトが環境によって通ったり止まったりする。
-  #   届かない → gh を見せずに upstream のチェックサム検証へ委ねる(警告を出す)
+  #
+  # 既定は fail-closed: 到達できないなら止める。チェックサムは本体アセットと同じ
+  # リリースから取得するため、リリース資産が差し替えられた場合は検知できない
+  # (署名検証だけがこれを検知できる)。ログの警告は見落とされやすいので、
+  # 検証を外す判断は既定にせず、明示的な指定でのみ行う。
   #   届く     → install.sh に任せる。不一致なら exit 4 で止まるのが正しい
-  # AIDLC_REQUIRE_PROVENANCE=1 なら、届かないときは降格せず止める。
+  #   届かない → 止める(Network access の許可を促す)
+  #   届かない + AIDLC_ALLOW_UNVERIFIED=1 → gh を見せずに upstream の
+  #     チェックサム検証へ委ねる(警告を出す)
   # (インストール失敗後に gh 抜きでやり直す作りにしないのは、本当に改ざんされて
   #  いた場合まで黙って通してしまうため。「検証できない」と「不一致」を区別する。)
   sigstore_reachable() {
@@ -155,11 +161,11 @@ if ! run_as "$AIDLC_BIN_DIR/aidlc" --version 2>/dev/null | \
     done
   }
   if [ -z "${AIDLC_GH_BIN:-}" ] && ! sigstore_reachable; then
-    if [ "${AIDLC_REQUIRE_PROVENANCE:-0}" = "1" ]; then
-      echo "Sigstore の TUF 配布元に届かないため provenance 検証ができません。環境の Network access に tuf-repo-cdn.sigstore.dev と tuf-repo.github.com を許可してください。" >&2
+    if [ "${AIDLC_ALLOW_UNVERIFIED:-0}" != "1" ]; then
+      echo "Sigstore の TUF 配布元に届かないため provenance 検証ができません。環境の Network access に tuf-repo-cdn.sigstore.dev と tuf-repo.github.com を許可してください。検証なし(SHA-256 チェックサムのみ)で進めるリスクを受け入れる場合は AIDLC_ALLOW_UNVERIFIED=1 を指定してください。" >&2
       exit 1
     fi
-    echo "warn: Sigstore の TUF 配布元に届かないため、provenance 検証を省略して SHA-256 チェックサム検証のみで続行します" >&2
+    echo "warn: AIDLC_ALLOW_UNVERIFIED=1 のため、Sigstore の provenance 検証を省略して SHA-256 チェックサム検証のみで続行します(リリース資産の差し替えは検知できません)" >&2
     export AIDLC_GH_BIN=/nonexistent/gh
   fi
 
