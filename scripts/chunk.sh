@@ -86,7 +86,7 @@ PY
 
 if [ ! -f "$SSH_KEY" ]; then
   if command -v ssh-keygen >/dev/null 2>&1; then
-    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -q
+    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -q || FAILED+=("chunk_ai key (ssh-keygen での作成に失敗)")
   elif has_py_crypto; then
     # openssh-client を入れられなかった場合でも、chunk に PKCS#8 の鍵を作らせない
     write_openssh_key_py generate || FAILED+=("chunk_ai key (python3 での作成に失敗)")
@@ -102,7 +102,7 @@ elif head -1 "$SSH_KEY" | grep -q "BEGIN PRIVATE KEY"; then
     write_openssh_key_py convert || FAILED+=("chunk_ai key (PKCS#8 からの変換に失敗。元の鍵は $BACKUP)")
   elif command -v ssh-keygen >/dev/null 2>&1; then
     rm -f "$SSH_KEY" "$SSH_KEY.pub"
-    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -q
+    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -q || FAILED+=("chunk_ai key (ssh-keygen での再作成に失敗。元の鍵は $BACKUP)")
   else
     FAILED+=("chunk_ai key (PKCS#8 のまま。変換手段が無い)")
   fi
